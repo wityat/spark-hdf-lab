@@ -1,0 +1,112 @@
+version: "3"
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    hostname: namenode
+    restart: always
+    ports:
+      - 9870:9870
+      - 9000:9000
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - "./taxi_fare/test.csv:/taxi_fare/test.csv"
+      - "./taxi_fare/train.csv:/taxi_fare/train.csv"
+    env_file:
+      - ./hadoop.env
+    networks:
+      - network
+    platform: linux/amd64
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+
+  datanode1:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode1
+    hostname: datanode1
+    restart: always
+    ports:
+      - 9864:9864
+    volumes:
+      - hadoop_datanode1:/hadoop/dfs/data
+    networks:
+      - network
+    env_file:
+      - hadoop.env
+    platform: linux/amd64
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  #  datanode2:
+#    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+#    container_name: datanode2
+#    restart: always
+#    volumes:
+#      - hadoop_datanode2:/hadoop/dfs/data
+#    environment:
+#      SERVICE_PRECONDITION: "namenode:9870"
+#    env_file:
+#      - hadoop.env
+#
+#  datanode3:
+#    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+#    container_name: datanode3
+#    restart: always
+#    volumes:
+#      - hadoop_datanode3:/hadoop/dfs/data
+#    environment:
+#      SERVICE_PRECONDITION: "namenode:9870"
+#    env_file:
+#      - hadoop.env
+
+  spark-master:
+    image: bde2020/spark-master:3.0.0-hadoop3.2
+    container_name: spark-master
+    hostname: spark-master
+    depends_on:
+      - namenode
+      - datanode1
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    env_file:
+      hadoop.env
+    networks:
+      - network
+    deploy:
+      resources:
+        limits:
+          memory: 7G
+
+  spark-worker-1:
+    image: bde2020/spark-worker:3.0.0-hadoop3.2
+    container_name: spark-worker-1
+    hostname: spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8081:8081"
+    environment:
+      SPARK_MODE: worker
+      SPARK_WORKER_CORES: 2
+      SPARK_WORKER_MEMORY: 2g
+      SPARK_MASTER_URL: spark://spark-master:7077
+    env_file:
+      hadoop.env
+    networks:
+      - network
+
+  
+volumes:
+  hadoop_namenode:
+  hadoop_datanode1:
+
+networks:
+  network:
+    driver: bridge
+    name: network
