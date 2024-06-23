@@ -47,6 +47,44 @@ services:
         limits:
           memory: 4G
 
+  datanode2:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode2
+    hostname: datanode2
+    restart: always
+    volumes:
+      - hadoop_datanode2:/hadoop/dfs/data
+    networks:
+      - network
+    env_file:
+      - hadoop.env
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    platform: linux/amd64
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  datanode3:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode3
+    hostname: datanode3
+    restart: always
+    volumes:
+      - hadoop_datanode3:/hadoop/dfs/data
+    networks:
+      - network
+    env_file:
+      - hadoop.env
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+    platform: linux/amd64
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
   spark-master:
     build:
       context: .
@@ -98,7 +136,7 @@ services:
     networks:
       - network
 
-  
+
 volumes:
   hadoop_namenode:
   hadoop_datanode1:

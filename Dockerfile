@@ -3,8 +3,9 @@ FROM bitnami/spark:latest
 USER root
 
 RUN apt update -y && apt upgrade -y && apt install -y python3-pip
-
-RUN pip install -r requirements.txt
+COPY ./requirements.txt /requirements.txt
+COPY ./app/app.py /opt/bitnami/spark/app.py
+RUN pip install -r /requirements.txt
 
 USER 1001
 

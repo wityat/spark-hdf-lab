@@ -41,22 +41,17 @@ def save_as_graph(total_time, total_RAM, path):
     plt.close()
 
 
-def get_total_executor_memory_usage():
-    spark_master_url = os.getenv("SPARK_MASTER_URL")
-    total_memory_used = 0
-    response = requests.get(f'{spark_master_url}/api/v1/applications')
-    if response.status_code == 200:
-        applications = response.json()
-        for app in applications:
-            app_id = app['id']
-            app_detail_response = requests.get(f'{spark_master_url}/api/v1/applications/{app_id}/executors')
-            if app_detail_response.status_code == 200:
-                executors = app_detail_response.json()
-                for executor in executors:
-                    total_memory_used += executor['memoryUsed']
-    else:
-        print("Failed to get applications list")
-    return total_memory_used
+def get_total_executor_memory(sc):
+    executor_memory_status = sc._jsc.sc().getExecutorMemoryStatus()
+    executor_memory_status_dict = sc._jvm.scala.collection.JavaConverters.mapAsJavaMapConverter(
+        executor_memory_status).asJava()
+
+    total_used_memory = sum(
+        (values._1() - values._2()) / (1024 * 1024)  # Convert bytes to MB
+        for values in executor_memory_status_dict.values()
+    )
+
+    return total_used_memory
 
 
 def train(train_data):
@@ -94,17 +89,18 @@ def main(data_path, datanodes, is_optimal):
     for i in tqdm(range(100)):
         start_time = time.perf_counter()
 
+        train_data = (spark.read.csv(data_path, header=True)).toPandas()
+
         if is_optimal:
-            spark.sparkContext.parallelize(range(50)).map(train)
+            spark.sparkContext.parallelize([train_data for _ in range(100)]).map(train)
         else:
-            train_data = spark.read.csv(data_path, header=True)
             train(train_data)
 
         end_time = time.perf_counter()
         time_spend.append(end_time - start_time)
-        RAM_used.append(get_total_executor_memory_usage())
+        RAM_used.append(get_total_executor_memory(sc))
 
-    save_as_graph(time_spend, RAM_used, f'./{"" if is_optimal else "not_"}optimal_spark_with_{datanodes}_datanodes')
+    save_as_graph(time_spend, RAM_used, f'./images/{"" if is_optimal else "not_"}optimal_spark_with_{datanodes}_datanodes')
 
     spark.stop()
 
