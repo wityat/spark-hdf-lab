@@ -1,18 +1,14 @@
 import argparse
-import os
 import time
-
+from pyspark.ml.feature import VectorAssembler, StandardScaler
 import seaborn as sns
-import requests
 from matplotlib import pyplot as plt
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_squared_error
-from sklearn.preprocessing import StandardScaler
-from sklearn.pipeline import make_pipeline
+from pyspark.ml.regression import LinearRegression
+from pyspark.ml.evaluation import RegressionEvaluator
+
 from pyspark.sql import SparkSession
 from tqdm import tqdm
-
+import psutil
 
 def save_as_graph(total_time, total_RAM, path):
     plt.figure(figsize=(14, 6))
@@ -37,37 +33,39 @@ def save_as_graph(total_time, total_RAM, path):
     plt.grid(True)
 
     plt.tight_layout()
-    plt.savefig(path+".png")
+    plt.savefig(path + ".png")
     plt.close()
 
 
-def get_total_executor_memory(sc):
-    executor_memory_status = sc._jsc.sc().getExecutorMemoryStatus()
-    executor_memory_status_dict = sc._jvm.scala.collection.JavaConverters.mapAsJavaMapConverter(
-        executor_memory_status).asJava()
-
-    total_used_memory = sum(
-        (values._1() - values._2()) / (1024 * 1024)  # Convert bytes to MB
-        for values in executor_memory_status_dict.values()
-    )
-
+def get_total_executor_memory():
+    total_used_memory = psutil.virtual_memory().used / (1024 * 1024)  # Convert bytes to MB
     return total_used_memory
 
 
 def train(train_data):
-    X = train_data[['distance_traveled', 'num_of_passengers']]
-    y = train_data['fare']
+    # Assemble features into a single vector
+    feature_columns = ['distance_traveled', 'num_of_passengers']
+    assembler = VectorAssembler(inputCols=feature_columns, outputCol='features')
+    assembled_data = assembler.transform(train_data)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    # Standardize features
+    scaler = StandardScaler(inputCol='features', outputCol='scaled_features')
+    scaler_model = scaler.fit(assembled_data)
+    scaled_data = scaler_model.transform(assembled_data)
 
-    model = make_pipeline(StandardScaler(), LinearRegression())  # Train the model
-    model.fit(X_train, y_train)
+    # Split the data into training and test sets
+    train_data, test_data = scaled_data.randomSplit([0.8, 0.2], seed=42)
+
+    # Train the model
+    lr = LinearRegression(featuresCol='scaled_features', labelCol='fare')
+    lr_model = lr.fit(train_data)
 
     # Make predictions on the test set
-    predictions = model.predict(X_test)
+    predictions = lr_model.transform(test_data)
 
     # Evaluate the model
-    mse = mean_squared_error(y_test, predictions)
+    evaluator = RegressionEvaluator(labelCol='fare', predictionCol='prediction', metricName='mse')
+    mse = evaluator.evaluate(predictions)
     return mse
 
 
@@ -79,26 +77,26 @@ def main(data_path, datanodes, is_optimal):
         .getOrCreate()
     )
 
-    sc = spark.sparkContext
-    logger = sc._jvm.org.apache.log4j
-    logger.LogManager.getLogger("org").setLevel(logger.Level.ERROR)
-
     time_spend = []
     RAM_used = []
+
+    train_data = spark.read.csv(data_path, header=True, inferSchema=True)
+
+    if is_optimal:
+        # Repartition to ensure data is evenly distributed
+        train_data = train_data.repartition(datanodes)
+
+        # Cache the DataFrame to avoid recomputing
+        train_data = train_data.cache()
 
     for i in tqdm(range(100)):
         start_time = time.perf_counter()
 
-        train_data = (spark.read.csv(data_path, header=True)).toPandas()
-
-        if is_optimal:
-            spark.sparkContext.parallelize([train_data for _ in range(100)]).map(train)
-        else:
-            train(train_data)
+        mse = train(train_data)
 
         end_time = time.perf_counter()
         time_spend.append(end_time - start_time)
-        RAM_used.append(get_total_executor_memory(sc))
+        RAM_used.append(get_total_executor_memory())
 
     save_as_graph(time_spend, RAM_used, f'./images/{"" if is_optimal else "not_"}optimal_spark_with_{datanodes}_datanodes')
 
